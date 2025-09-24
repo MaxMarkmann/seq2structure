@@ -2,8 +2,8 @@ import json
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
+from config import RESULTS_DIR  # <- ziehe Pfad sauber aus config.py
 
-RESULTS_DIR = Path("results")
 METRICS_FILE = RESULTS_DIR / "metrics.json"
 
 
@@ -34,9 +34,10 @@ def plot_accuracy_comparison(df: pd.DataFrame):
     plt.ylabel("Accuracy")
     plt.ylim(0, 1)
     plt.tight_layout()
-    plt.savefig(RESULTS_DIR / "accuracy_comparison.png")
+    out_file = RESULTS_DIR / "accuracy_comparison.png"
+    plt.savefig(out_file)
     plt.close()
-    print(f"Accuracy comparison plot saved to {RESULTS_DIR / 'accuracy_comparison.png'}")
+    print(f"Accuracy comparison plot saved to {out_file}")
 
 
 def main():
