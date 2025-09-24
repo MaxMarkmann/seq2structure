@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from pathlib import Path
 
 from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearchCV
 from sklearn.linear_model import LogisticRegression
@@ -13,7 +12,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from torch.utils.data import TensorDataset, DataLoader, random_split
 
 from config import RESULTS_DIR
@@ -159,7 +158,7 @@ def train_mlp(
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.1)
-    scaler = GradScaler(enabled=(device=="cuda"))
+    scaler = GradScaler("cuda" if device == "cuda" else "cpu", enabled=(device == "cuda"))
 
     train_losses, val_losses = [], []
     best_val = float("inf")
@@ -173,7 +172,7 @@ def train_mlp(
         for xb, yb in train_loader:
             xb, yb = xb.to(device), yb.to(device)
             optimizer.zero_grad(set_to_none=True)
-            with autocast(enabled=(device=="cuda")):
+            with autocast(device_type="cuda", enabled=(device == "cuda")):
                 logits = model(xb)
                 loss = criterion(logits, yb)
             scaler.scale(loss).backward()
@@ -188,7 +187,7 @@ def train_mlp(
         with torch.no_grad():
             for xb, yb in val_loader:
                 xb, yb = xb.to(device), yb.to(device)
-                with autocast(enabled=(device=="cuda")):
+                with autocast(device_type="cuda", enabled=(device == "cuda")):
                     logits = model(xb)
                     loss = criterion(logits, yb)
                 total_v += loss.item()
@@ -220,7 +219,7 @@ def train_mlp(
     with torch.no_grad():
         for xb, yb in test_loader:
             xb = xb.to(device)
-            with autocast(enabled=(device=="cuda")):
+            with autocast(device_type="cuda", enabled=(device == "cuda")):
                 logits = model(xb)
             preds = torch.argmax(logits, dim=1).cpu().numpy()
             all_preds.extend(preds)
