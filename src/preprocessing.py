@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Tuple
+from typing import Tuple
 
 # Standard amino acids (20)
 AMINO_ACIDS = "ACDEFGHIKLMNPQRSTVWY"
@@ -17,22 +17,24 @@ def one_hot_encode_aa(aa: str) -> np.ndarray:
     return vec
 
 
-def preprocess_dataset(df, window_size: int = 17) -> Tuple[np.ndarray, np.ndarray]:
+def preprocess_dataset(df, window_size: int = 17) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert sequences and labels into X, y arrays using a sliding window.
+    Also returns groups (protein IDs) for GroupKFold.
 
     Args:
-        df (pd.DataFrame): DataFrame with 'seq' and 'sst3' columns
+        df (pd.DataFrame): DataFrame with 'seq', 'sst3' and 'pdb_id'
         window_size (int): size of sliding window (must be odd)
 
     Returns:
         X (np.ndarray): shape (N, window_size*20) → features
         y (np.ndarray): shape (N,) → labels (0=H, 1=E, 2=C)
+        groups (np.ndarray): shape (N,) → protein IDs (for GroupKFold)
     """
     half_win = window_size // 2
-    X, y = [], []
+    X, y, groups = [], [], []
 
-    for seq, labels in zip(df["seq"], df["sst3"]):
+    for pdb_id, seq, labels in zip(df["pdb_id"], df["seq"], df["sst3"]):
         seq = seq.upper()
         labels = labels.upper()
 
@@ -49,4 +51,7 @@ def preprocess_dataset(df, window_size: int = 17) -> Tuple[np.ndarray, np.ndarra
             # encode label of the central AA
             y.append(SS3_TO_INT[labels[i]])
 
-    return np.array(X), np.array(y)
+            # group = protein id for this residue
+            groups.append(pdb_id)
+
+    return np.array(X), np.array(y), np.array(groups)

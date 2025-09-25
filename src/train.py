@@ -2,11 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearchCV
+from sklearn.model_selection import train_test_split, GroupKFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 import torch
@@ -45,7 +43,7 @@ def _evaluate_model(clf, X_test, y_test, name: str):
     y_pred = clf.predict(X_test)
     acc = accuracy_score(y_test, y_pred)
     report = classification_report(y_test, y_pred, target_names=["H", "E", "C"])
-    cm = confusion_matrix(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred, labels=[0, 1, 2])  # fix
 
     print(f"\n=== {name} Results ===")
     print(f"Accuracy: {acc:.4f}\n{report}")
@@ -227,7 +225,7 @@ def train_mlp(
 
     acc = (np.array(all_preds) == np.array(all_labels)).mean()
     report = classification_report(all_labels, all_preds, target_names=["H","E","C"])
-    cm = confusion_matrix(all_labels, all_preds)
+    cm = confusion_matrix(all_labels, all_preds, labels=[0, 1, 2])  # fix
 
     print(f"MLP Accuracy: {acc:.4f}\n{report}")
     _plot_confusion_matrix(cm, "MLP")
@@ -250,87 +248,36 @@ def train_mlp(
 
 
 # ----------------------------------------------------------------------
-# GridSearch CV for Logistic Regression & Random Forest
+# Logistic Regression mit GroupKFold
 # ----------------------------------------------------------------------
 
-def _subsample_xy(X, y, n=300_000, seed=42):
-    """Subsample dataset (stratified by class)."""
-    if len(y) <= n:
-        return X, y
-    rng = np.random.default_rng(seed)
-    idxs = []
-    y = np.asarray(y)
-    for cls in np.unique(y):
-        cls_idx = np.where(y == cls)[0]
-        take = int(n * (len(cls_idx) / len(y)))
-        take = max(1, take)
-        idxs.extend(rng.choice(cls_idx, size=take, replace=False))
-    idxs = np.array(sorted(idxs))
-    return X[idxs], y[idxs]
+def train_baseline_groupkfold(X, y, groups, n_splits: int = 5):
+    """Train Logistic Regression with GroupKFold (protein-level split)."""
+    gkf = GroupKFold(n_splits=n_splits)
 
+    all_metrics = []
+    fold = 1
+    for train_idx, test_idx in gkf.split(X, y, groups):
+        print(f"\n=== Fold {fold}/{n_splits} ===")
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
 
-def train_logreg_cv(X, y, sample_size=300_000, cv_splits=3, random_state=42):
-    """GridSearch CV for Logistic Regression (on subsample)."""
-    Xs, ys = _subsample_xy(X, y, n=sample_size, seed=random_state)
-    print(f"LogReg CV on subsample: X={Xs.shape}, y={ys.shape}, cv={cv_splits}")
+        clf = LogisticRegression(max_iter=200, n_jobs=-1)
+        clf.fit(X_train, y_train)
 
-    pipe = Pipeline([
-        ("scaler", StandardScaler()),
-        ("clf", LogisticRegression(max_iter=500, solver="saga", n_jobs=-1, class_weight="balanced"))
-    ])
-    param_grid = {"clf__C": [0.1, 1.0, 2.0], "clf__penalty": ["l2"]}
-    cv = StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=random_state)
-    gs = GridSearchCV(pipe, param_grid, cv=cv, n_jobs=-1, verbose=1, scoring="accuracy")
-    gs.fit(Xs, ys)
+        metrics = _evaluate_model(clf, X_test, y_test, name=f"LogReg (Fold {fold})")
+        all_metrics.append(metrics)
+        fold += 1
 
-    print("Best params (LogReg):", gs.best_params_)
-    print("Best CV score:", gs.best_score_)
+    # Mittelwert über alle Folds
+    avg_acc = np.mean([m["accuracy"] for m in all_metrics])
+    print(f"\n=== GroupKFold Average Accuracy: {avg_acc:.4f} ===")
 
-    # Holdout eval
-    X_train, X_test, y_train, y_test = train_test_split(Xs, ys, test_size=0.2, stratify=ys)
-    y_pred = gs.best_estimator_.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    report = classification_report(y_test, y_pred, target_names=["H","E","C"])
-    cm = confusion_matrix(y_test, y_pred)
-    print("\n=== Logistic Regression (GridSearch) ===")
-    print(f"Holdout Accuracy: {acc:.4f}\n{report}")
-    _plot_confusion_matrix(cm, "Logistic Regression (GridSearch)")
+    # Speichern
+    save_metrics("Logistic Regression (GroupKFold)", {
+        "accuracy": avg_acc,
+        "report": "Cross-validation results saved per fold",
+        "confusion_matrix": "see fold plots"
+    })
 
-    metrics = {"accuracy": float(acc), "report": report, "confusion_matrix": cm.tolist()}
-    save_metrics("Logistic Regression (GridSearch)", metrics)
-    return gs.best_estimator_, metrics
-
-
-def train_rf_cv(X, y, sample_size=300_000, cv_splits=3, random_state=42):
-    """GridSearch CV for Random Forest (on subsample)."""
-    Xs, ys = _subsample_xy(X, y, n=sample_size, seed=random_state)
-    print(f"RandomForest CV on subsample: X={Xs.shape}, y={ys.shape}, cv={cv_splits}")
-
-    rf = RandomForestClassifier(random_state=random_state, n_jobs=-1)
-    param_grid = {
-        "n_estimators": [200, 400],
-        "max_depth": [None, 20, 40],
-        "min_samples_split": [2, 10],
-        "min_samples_leaf": [1, 3],
-        "max_features": ["sqrt", "log2"],
-    }
-    cv = StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=random_state)
-    gs = GridSearchCV(rf, param_grid, cv=cv, n_jobs=-1, verbose=1, scoring="accuracy")
-    gs.fit(Xs, ys)
-
-    print("Best params (RF):", gs.best_params_)
-    print("Best CV score:", gs.best_score_)
-
-    # Holdout eval
-    X_train, X_test, y_train, y_test = train_test_split(Xs, ys, test_size=0.2, stratify=ys)
-    y_pred = gs.best_estimator_.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    report = classification_report(y_test, y_pred, target_names=["H","E","C"])
-    cm = confusion_matrix(y_test, y_pred)
-    print("\n=== Random Forest (GridSearch) ===")
-    print(f"Holdout Accuracy: {acc:.4f}\n{report}")
-    _plot_confusion_matrix(cm, "Random Forest (GridSearch)")
-
-    metrics = {"accuracy": float(acc), "report": report, "confusion_matrix": cm.tolist()}
-    save_metrics("Random Forest (GridSearch)", metrics)
-    return gs.best_estimator_, metrics
+    return clf, all_metrics
