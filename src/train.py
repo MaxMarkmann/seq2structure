@@ -1,11 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import os
+from datetime import datetime
+import pandas as pd
 
 from sklearn.model_selection import train_test_split, GroupKFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.neural_network import MLPClassifier
 
 import torch
 import torch.nn as nn
@@ -298,55 +302,68 @@ def train_baseline_groupkfold(X, y, groups, n_splits: int = 5):
     return clf, all_metrics
 
 
-def train_with_embeddings(X, y, model_type="logreg"):
-    """
-    Trainiert ein Klassifikationsmodell direkt auf ProtBERT/ESM-Embeddings.
-
-    Parameters
-    ----------
-    X : np.ndarray
-        Embeddings (n_samples, hidden_dim)
-    y : np.ndarray
-        Labels (z. B. Sekundärstruktur, als Strings)
-    model_type : str
-        Modelltyp ("logreg", "mlp", "rf")
-
-    Returns
-    -------
-    model : sklearn estimator
-        Trainiertes Modell
-    """
-
-    print(f"Training with embeddings: {X.shape}, labels={len(y)}")
-
-    # Train/Test-Split (z. B. 80/20)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
-
+def _train_and_eval(X_train, y_train, X_test, y_test, model_type):
     if model_type == "logreg":
-        model = LogisticRegression(max_iter=1000, verbose=1, n_jobs=-1)
+        model = LogisticRegression(max_iter=200, n_jobs=-1)
     elif model_type == "rf":
-        from sklearn.ensemble import RandomForestClassifier
-        model = RandomForestClassifier(n_estimators=200, n_jobs=-1, random_state=42)
+        model = RandomForestClassifier(n_estimators=200, n_jobs=-1)
     elif model_type == "mlp":
-        from sklearn.neural_network import MLPClassifier
-        model = MLPClassifier(hidden_layer_sizes=(512, 256), max_iter=50, random_state=42)
+        model = MLPClassifier(hidden_layer_sizes=(512, 256), max_iter=50, verbose=True)
     else:
-        raise ValueError(f"Unknown model_type: {model_type}")
+        raise ValueError(f"Unknown model type: {model_type}")
 
-    # Training
+    print(f"Fitting {model_type.upper()}...")
     model.fit(X_train, y_train)
-
-    # Evaluation
     y_pred = model.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    print(f"Accuracy ({model_type}): {acc:.4f}")
 
-    print("\nClassification report:")
+    acc = accuracy_score(y_test, y_pred)
+    print(f"{model_type.upper()} Accuracy: {acc:.4f}")
     print(classification_report(y_test, y_pred))
 
-    # Optional: Speichere Metriken
-    save_metrics(f"{model_type.upper()} (Embeddings)", {"accuracy": acc})
 
-    return model
+def train_with_embeddings(X, y, ids, model_type="logreg", use_groups=True):
+    print(f"Training with embeddings: {X.shape}, labels={len(y)}")
+
+    models = ["logreg", "rf", "mlp"] if model_type == "all" else [model_type]
+
+    for m in models:
+        print(f"\n=== Training {m.upper()} ===")
+
+        if use_groups:
+            # Gruppiere nach PDB-ID (alles vor dem "_")
+            groups = np.array([seq_id.split("_")[0] for seq_id in ids])
+            gkf = GroupKFold(n_splits=5)
+
+            fold_accs = []
+            for fold, (train_idx, test_idx) in enumerate(gkf.split(X, y, groups)):
+                print(f"\n--- Fold {fold+1} ---")
+                X_train, X_test = X[train_idx], X[test_idx]
+                y_train, y_test = y[train_idx], y[test_idx]
+                _train_and_eval(X_train, y_train, X_test, y_test, m)
+
+        else:
+            # Kein Stratify, um Fehler bei Klassen mit nur 1 Sample zu vermeiden
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42
+            )
+            _train_and_eval(X_train, y_train, X_test, y_test, m)
+
+
+def train_residue_embeddings(X, y, model_type="mlp"):
+    print(f"Training residue-level model: {model_type}")
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y)
+
+    if model_type == "logreg":
+        clf = LogisticRegression(max_iter=500, verbose=1, n_jobs=-1)
+    elif model_type == "rf":
+        clf = RandomForestClassifier(n_estimators=200, n_jobs=-1)
+    elif model_type == "mlp":
+        clf = MLPClassifier(hidden_layer_sizes=(512, 256), max_iter=20, verbose=True)
+    else:
+        raise ValueError(f"Unknown model_type={model_type}")
+
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
+
+    print("=== Classification Report (Residue Level) ===")
+    print(classification_report(y_test, y_pred))

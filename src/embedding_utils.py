@@ -30,3 +30,16 @@ def summarize_embeddings(path):
     print(f" - IDs: {len(ids)}")
     print(f" - First ID: {ids[0] if len(ids) > 0 else 'None'}")
     return X, y, ids
+
+def load_residue_embeddings(filename="protbert_residue_embeddings.npz"):
+    path = PROCESSED_DATA_DIR / filename
+    data = np.load(path, allow_pickle=True)
+
+    embeddings = data["embeddings"]   # Liste von Arrays [L_i, 1024]
+    labels = data["labels"]           # Liste von Listen [L_i]
+    ids = data["ids"]
+
+    # Flatten
+    X = np.vstack(embeddings)  # shape (sum(L_i), 1024)
+    y = np.concatenate(labels) # shape (sum(L_i),)
+    return X, y, ids

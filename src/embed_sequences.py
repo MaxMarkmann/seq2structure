@@ -15,7 +15,7 @@ def embed_protbert(seq: str, model, tokenizer, device="cpu"):
     return embeddings[1:-1].cpu().numpy()
 
 
-def run_embedding(n_proteins=None, out_file="embeddings.npz", device="cpu"):
+def run_embedding(n_proteins=None, out_file="protbert_residue_embeddings.npz", device="cpu"):
     print(f"Loading ProtBERT on {device} ...")
     tokenizer = AutoTokenizer.from_pretrained("Rostlab/prot_bert", do_lower_case=False)
     model = AutoModel.from_pretrained("Rostlab/prot_bert").to(device)
@@ -30,7 +30,7 @@ def run_embedding(n_proteins=None, out_file="embeddings.npz", device="cpu"):
     for i, row in df.iterrows():
         seq_id = f"{row['pdb_id']}_{row['chain_code']}"
         seq = row["seq"]
-        label = row["sst3"]  # oder "sst8" falls du das willst
+        labels = row["sst3"]
 
         print(f"[{i+1}/{len(df)}] Embedding {seq_id} (len={len(seq)})")
 
@@ -38,20 +38,19 @@ def run_embedding(n_proteins=None, out_file="embeddings.npz", device="cpu"):
         tokens = tokenizer(spaced_seq, return_tensors="pt", padding=True).to(device)
 
         with torch.no_grad():
-            embedding = model(**tokens).last_hidden_state.mean(dim=1).cpu().numpy()
+            outputs = model(**tokens)
+            emb = outputs.last_hidden_state.squeeze(0)[1:-1]  # [L, 1024]
 
-        all_embeddings.append(embedding.squeeze())
-        all_labels.append(label)
+        # speichern
+        all_embeddings.append(emb.cpu().numpy())   # Array pro Sequenz
+        all_labels.append(list(labels))            # Liste pro Sequenz
         all_ids.append(seq_id)
 
-    all_embeddings = np.stack(all_embeddings, axis=0)
-
-    # Pfad sauber ins processed-Verzeichnis schreiben
     out_path = PROCESSED_DATA_DIR / out_file
     np.savez_compressed(
         out_path,
-        embeddings=all_embeddings,
+        embeddings=np.array(all_embeddings, dtype=object),
         labels=np.array(all_labels, dtype=object),
         ids=np.array(all_ids, dtype=object),
     )
-    print(f"Saved embeddings to {out_path}")
+    print(f"Saved residue embeddings to {out_path}")

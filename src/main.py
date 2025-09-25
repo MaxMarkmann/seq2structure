@@ -1,11 +1,14 @@
 import argparse
+from pathlib import Path
 from dataloader import load_cb513
 from preprocessing import preprocess_dataset
 from train import train_baseline, train_random_forest, train_mlp, train_with_embeddings
 import analyze_results
-from embed_sequences import run_embedding   # 👈 Import der Embedding-Funktion
-import numpy as np
-from embedding_utils import load_embeddings, summarize_embeddings   # 👈 summarize importiert
+from embed_sequences import run_embedding
+from embedding_utils import load_embeddings, summarize_embeddings
+from config import PROCESSED_DATA_DIR   # 👈 wichtig
+from embedding_utils import load_residue_embeddings
+from train import train_residue_embeddings
 
 
 def run_training(encoding: str, group_split: bool = False, subset: int = None):
@@ -25,14 +28,28 @@ def run_analysis():
     analyze_results.main()
 
 
-def run_training_with_embeddings(embed_file: str, model_type: str):
-    X, y, ids = load_embeddings(embed_file)
+def run_training_with_embeddings(embed_file: str, model_type: str, use_groups: bool = True):
+    # Falls nur Dateiname übergeben: automatisch in data/processed suchen
+    embed_path = Path(embed_file)
+    if not embed_path.exists():
+        embed_path = PROCESSED_DATA_DIR / embed_file
+
+    X, y, ids = load_embeddings(embed_path)
     print(f"Loaded embeddings: {X.shape}, labels={len(y)}")
-    train_with_embeddings(X, y, model_type=model_type)
+
+    train_with_embeddings(X, y, ids, model_type=model_type, use_groups=use_groups)
+
+def run_training_residues(embed_file: str, model_type: str):
+    X, y, ids = load_residue_embeddings(embed_file)
+    print(f"Loaded residue embeddings: X={X.shape}, y={len(y)}")
+    train_residue_embeddings(X, y, model_type=model_type)
 
 
 def run_summarize(embed_file: str):
-    summarize_embeddings(embed_file)
+    embed_path = Path(embed_file)
+    if not embed_path.exists():
+        embed_path = PROCESSED_DATA_DIR / embed_file
+    summarize_embeddings(embed_path)
 
 
 def main():
@@ -41,7 +58,7 @@ def main():
     )
     parser.add_argument(
         "--mode",
-        choices=["train", "analyze", "all", "embed", "train_embed", "summarize"],
+        choices=["train", "analyze", "all", "embed", "train_embed", "summarize", "train_residues"],
         required=True,
         help="Choose whether to train models, analyze results, embed ProtBERT features, "
              "train on embeddings, summarize embeddings, or all",
@@ -55,7 +72,7 @@ def main():
     parser.add_argument(
         "--group-split",
         action="store_true",
-        help="Use GroupKFold split instead of random split",
+        help="Use GroupKFold split instead of random split (applies also to train_embed)",
     )
     parser.add_argument(
         "--subset",
@@ -79,13 +96,13 @@ def main():
         "--embed-file",
         type=str,
         default="protbert_embeddings.npz",
-        help="Path to embeddings file for --mode train_embed or summarize",
+        help="Path or filename of embeddings file for --mode train_embed or summarize",
     )
     parser.add_argument(
         "--model",
         type=str,
         default="logreg",
-        choices=["logreg", "rf", "mlp"],
+        choices=["logreg", "rf", "mlp", "all"],
         help="Model type when training on embeddings",
     )
 
@@ -101,9 +118,13 @@ def main():
     elif args.mode == "embed":
         run_embedding(n_proteins=args.subset, out_file=args.out, device=args.device)
     elif args.mode == "train_embed":
-        run_training_with_embeddings(embed_file=args.embed_file, model_type=args.model)
+        run_training_with_embeddings(embed_file=args.embed_file,
+                                     model_type=args.model,
+                                     use_groups=args.group_split)
     elif args.mode == "summarize":
         run_summarize(embed_file=args.embed_file)
+    elif args.mode == "train_residues":
+        run_training_residues(embed_file=args.embed_file, model_type=args.model)
 
 
 if __name__ == "__main__":
