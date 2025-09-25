@@ -1,5 +1,7 @@
 import numpy as np
+import torch
 from typing import Tuple
+from transformers import AutoTokenizer, AutoModel
 
 # Standard amino acids (20)
 AMINO_ACIDS = "ACDEFGHIKLMNPQRSTVWY"
@@ -17,7 +19,7 @@ def one_hot_encode_aa(aa: str) -> np.ndarray:
     return vec
 
 
-def preprocess_dataset(df, window_size: int = 17) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def preprocess_dataset_onehot(df, window_size: int = 17) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert sequences and labels into X, y arrays using a sliding window.
     Also returns groups (protein IDs) for GroupKFold.
@@ -55,3 +57,37 @@ def preprocess_dataset(df, window_size: int = 17) -> Tuple[np.ndarray, np.ndarra
             groups.append(pdb_id)
 
     return np.array(X), np.array(y), np.array(groups)
+
+
+def preprocess_dataset_protbert(df) -> Tuple[np.ndarray, np.ndarray]:
+    """Use ProtBERT embeddings for each residue."""
+    tokenizer = AutoTokenizer.from_pretrained("Rostlab/prot_bert")
+    model = AutoModel.from_pretrained("Rostlab/prot_bert")
+    model.eval()
+
+    X, y = [], []
+    for seq, labels in zip(df["seq"], df["sst3"]):
+        spaced_seq = " ".join(list(seq))
+        inputs = tokenizer(spaced_seq, return_tensors="pt", add_special_tokens=True)
+        with torch.no_grad():
+            outputs = model(**inputs)
+        embeddings = outputs.last_hidden_state.squeeze(0)  # (seq_len, hidden_dim)
+
+        for i, label in enumerate(labels):
+            X.append(embeddings[i+1].numpy())  # skip [CLS], take per-residue
+            y.append(SS3_TO_INT[label])
+    return np.array(X), np.array(y)
+
+
+def preprocess_dataset(df, encoding: str = "onehot", window_size: int = 17):
+    """
+    Wrapper to choose encoding method.
+    Args:
+        encoding: "onehot" | "protbert"
+    """
+    if encoding == "onehot":
+        return preprocess_dataset_onehot(df, window_size)
+    elif encoding == "protbert":
+        return preprocess_dataset_protbert(df)
+    else:
+        raise ValueError(f"Unknown encoding: {encoding}")

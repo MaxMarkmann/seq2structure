@@ -296,3 +296,57 @@ def train_baseline_groupkfold(X, y, groups, n_splits: int = 5):
     })
 
     return clf, all_metrics
+
+
+def train_with_embeddings(X, y, model_type="logreg"):
+    """
+    Trainiert ein Klassifikationsmodell direkt auf ProtBERT/ESM-Embeddings.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Embeddings (n_samples, hidden_dim)
+    y : np.ndarray
+        Labels (z. B. Sekundärstruktur, als Strings)
+    model_type : str
+        Modelltyp ("logreg", "mlp", "rf")
+
+    Returns
+    -------
+    model : sklearn estimator
+        Trainiertes Modell
+    """
+
+    print(f"Training with embeddings: {X.shape}, labels={len(y)}")
+
+    # Train/Test-Split (z. B. 80/20)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    if model_type == "logreg":
+        model = LogisticRegression(max_iter=1000, verbose=1, n_jobs=-1)
+    elif model_type == "rf":
+        from sklearn.ensemble import RandomForestClassifier
+        model = RandomForestClassifier(n_estimators=200, n_jobs=-1, random_state=42)
+    elif model_type == "mlp":
+        from sklearn.neural_network import MLPClassifier
+        model = MLPClassifier(hidden_layer_sizes=(512, 256), max_iter=50, random_state=42)
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}")
+
+    # Training
+    model.fit(X_train, y_train)
+
+    # Evaluation
+    y_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    print(f"Accuracy ({model_type}): {acc:.4f}")
+
+    print("\nClassification report:")
+    print(classification_report(y_test, y_pred))
+
+    # Optional: Speichere Metriken
+    save_metrics(f"{model_type.upper()} (Embeddings)", {"accuracy": acc})
+
+    return model
