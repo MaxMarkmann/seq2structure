@@ -265,19 +265,34 @@ def train_baseline_groupkfold(X, y, groups, n_splits: int = 5):
         clf = LogisticRegression(max_iter=200, n_jobs=-1)
         clf.fit(X_train, y_train)
 
-        metrics = _evaluate_model(clf, X_test, y_test, name=f"LogReg (Fold {fold})")
-        all_metrics.append(metrics)
+        # evaluate
+        y_pred = clf.predict(X_test)
+        acc = accuracy_score(y_test, y_pred)
+        report = classification_report(y_test, y_pred, target_names=["H", "E", "C"])
+        cm = confusion_matrix(y_test, y_pred, labels=[0, 1, 2])
+
+        print(f"Fold {fold} accuracy: {acc:.4f}")
+        all_metrics.append({
+            "fold": fold,
+            "accuracy": acc,
+            "report": report,
+            "confusion_matrix": cm.tolist()
+        })
+
+        # Save per-fold confusion matrix plot
+        _plot_confusion_matrix(cm, f"LogReg_Fold{fold}")
+
         fold += 1
 
-    # Mittelwert über alle Folds
+    # Durchschnitt über alle Folds
     avg_acc = np.mean([m["accuracy"] for m in all_metrics])
     print(f"\n=== GroupKFold Average Accuracy: {avg_acc:.4f} ===")
 
-    # Speichern
+    # Report in JSON speichern: alle Folds + Durchschnitt
     save_metrics("Logistic Regression (GroupKFold)", {
         "accuracy": avg_acc,
-        "report": "Cross-validation results saved per fold",
-        "confusion_matrix": "see fold plots"
+        "report": "Cross-validation results",
+        "folds": all_metrics
     })
 
     return clf, all_metrics

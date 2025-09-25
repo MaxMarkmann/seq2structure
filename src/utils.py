@@ -19,19 +19,28 @@ def save_metrics(model_name: str, metrics: dict):
     else:
         all_metrics = {}
 
-    all_metrics[model_name] = {
+    # kopieren, aber confusion_matrix nur für top-level Modelle speichern
+    entry = {
         "accuracy": float(metrics["accuracy"]),
         "report": metrics["report"],
     }
+
+    if "confusion_matrix" in metrics and isinstance(metrics["confusion_matrix"], (list, np.ndarray)):
+        entry["confusion_matrix"] = metrics["confusion_matrix"]
+
+    if "folds" in metrics:  # GroupKFold-Sonderfall
+        entry["folds"] = metrics["folds"]
+
+    all_metrics[model_name] = entry
 
     with open(RESULTS_FILE, "w") as f:
         json.dump(all_metrics, f, indent=4)
 
     print(f"Metrics for {model_name} saved to {RESULTS_FILE}")
 
-    # confusion matrix
+    # confusion matrix als CSV nur wenn wirklich eine Matrix existiert
     cm = metrics.get("confusion_matrix")
-    if cm is not None:
+    if isinstance(cm, (list, np.ndarray)):
         cm_file = RESULTS_DIR / f"confusion_matrix_{model_name.lower().replace(' ', '_')}.csv"
         with open(cm_file, "w", newline="") as f:
             writer = csv.writer(f)
